@@ -3,12 +3,18 @@ from flask import request
 from db import Db
 import string
 import random
+import base64
+import qrcode
+import io
 
 app = flask.Flask(__name__)
 db = Db()
 
 def gen_token():
     return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(32))
+
+def gen_link(parent: str, child: str):
+    return base64.b64encode((parent +":"+ child).encode('utf-8')).decode('utf-8')
 
 @app.route('/')
 def index():
@@ -50,6 +56,22 @@ def get_child():
         print(e)
         return {'status': 'error'}
     
+@app.route('/create/<link>', methods=['GET'])
+def create_link(link):
+    return flask.render_template('null.html')
+
+
+@app.route('/auth/<link>', methods=['GET'])
+def auth_link(link):
+    try:
+        data = base64.b64decode(link).decode('utf-8')
+        print(data)
+        db.add_child(data.split(":")[0], data.split(":")[1])
+        return flask.redirect('/create/'+data)
+    except Exception as e:
+        print(e)
+        return flask.redirect('/control')
+    
 @app.route('/add_task', methods=['POST'])
 def add_task():
     try:
@@ -83,16 +105,32 @@ def get_my_tasks():
     try:
         user = db.get_user(request.form.get('parent'))[0]
         tasks = db.get_tasks(user[0], [request.form.get('child')])
+        if tasks == {}:
+            return {'status': 'ok', 'tasks': []}
         return {'status': 'ok', 'tasks': [i[2] for i in tasks[request.form.get('child')]]}
     except Exception as e:
-        print(e)
+        print(e, request.form)
         return {'status': 'error'}
     
 @app.route('/confirm_task', methods=['POST'])
 def confirm_task():
     try:
-        db.delete_task(request.form['parent'], request.form['child'], request.form['task'])
+        db.confirm_task(request.form['parent'], request.form['child'], request.form['task'], request.form['file'])
         return {'status': 'ok'}
+    except Exception as e:
+        print(e)
+        return {'status': 'error'}
+    
+
+@app.route('/create_child', methods=['POST'])
+def create_child():
+    try:
+        link = gen_link(request.form['parent'], request.form['child'])
+        img = qrcode.make(link)
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG")
+        image_bytes = buffered.getvalue()
+        return {'status': 'ok', 'link': "http://127.0.0.1/auth/"+link, 'qr': "data:image/jpeg;base64,"+base64.b64encode(image_bytes).decode('utf-8')}
     except Exception as e:
         print(e)
         return {'status': 'error'}
